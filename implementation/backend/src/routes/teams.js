@@ -90,7 +90,7 @@ router.get('/:teamId', authenticate, (req, res) => {
 
       // Get team members
       req.db.all(
-        `SELECT u.id, u.name, u.email, tm.role, tm.team_role, tm.added_at 
+        `SELECT u.id, u.name, u.email, tm.role, tm.added_at 
          FROM users u 
          JOIN team_members tm ON u.id = tm.user_id 
          WHERE tm.team_id = ?`,
@@ -127,7 +127,7 @@ router.get('/:teamId', authenticate, (req, res) => {
 
           // Get team members
           req.db.all(
-            `SELECT u.id, u.name, u.email, tm.role, tm.team_role, tm.added_at 
+            `SELECT u.id, u.name, u.email, tm.role, tm.added_at 
              FROM users u 
              JOIN team_members tm ON u.id = tm.user_id 
              WHERE tm.team_id = ?`,
@@ -235,7 +235,7 @@ router.post('/:teamId/members', authenticate, (req, res) => {
       
       // Check if user is a manager of this team
       req.db.get(
-        'SELECT team_role FROM team_members WHERE team_id = ? AND user_id = ? AND team_role = ?',
+        'SELECT role FROM team_members WHERE team_id = ? AND user_id = ? AND role = ?',
         [teamId, currentUser.id, 'manager'],
         (err, membership) => {
           if (err) return reject(err);
@@ -280,8 +280,8 @@ router.post('/:teamId/members', authenticate, (req, res) => {
               }
 
               // Add user to team
-              req.db.run('INSERT INTO team_members (team_id, user_id, role, team_role) VALUES (?, ?, ?, ?)',
-                [teamId, userId, memberRole, teamRole],
+              req.db.run('INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)',
+                [teamId, userId, memberRole],
                 (err) => {
                   if (err) {
                     return res.status(500).json({ error: 'Failed to add team member' });
@@ -314,7 +314,7 @@ router.delete('/:teamId/members/:userId', authenticate, (req, res) => {
       
       // Check if user is a manager of this team
       req.db.get(
-        'SELECT team_role FROM team_members WHERE team_id = ? AND user_id = ? AND team_role = ?',
+        'SELECT role FROM team_members WHERE team_id = ? AND user_id = ? AND role = ?',
         [teamId, currentUser.id, 'manager'],
         (err, membership) => {
           if (err) return reject(err);
