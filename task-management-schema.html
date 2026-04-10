@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Management App - Database Schema</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; padding: 40px 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #2c3e50; margin-bottom: 10px; }
+        .subtitle { color: #7f8c8d; margin-bottom: 40px; }
+        .schema-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 24px; margin-bottom: 40px; }
+        .table-card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
+        .table-header { background: #3498db; color: white; padding: 16px 20px; font-weight: 600; font-size: 18px; }
+        .table-body { padding: 0; }
+        .field { padding: 12px 20px; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between; align-items: start; }
+        .field:last-child { border-bottom: none; }
+        .field-name { font-weight: 500; color: #2c3e50; font-family: 'Courier New', monospace; }
+        .field-type { color: #7f8c8d; font-size: 13px; font-family: 'Courier New', monospace; }
+        .field-constraint { color: #e74c3c; font-size: 12px; margin-top: 4px; }
+        .field-info { text-align: right; }
+        .pk { background: #fff3cd; }
+        .fk { background: #d1ecf1; }
+        .relationships { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 40px; }
+        .relationships h2 { color: #2c3e50; margin-bottom: 16px; }
+        .rel-item { padding: 12px; background: #f8f9fa; border-left: 4px solid #3498db; margin-bottom: 8px; border-radius: 4px; }
+        .rel-item code { background: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+        .indexes { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .indexes h2 { color: #2c3e50; margin-bottom: 16px; }
+        .index-item { padding: 10px; background: #f8f9fa; margin-bottom: 6px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 14px; }
+        .legend { display: flex; gap: 24px; margin-bottom: 30px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-box { width: 20px; height: 20px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Management App</h1>
+        <p class="subtitle">Database Schema Design - Team Collaboration Platform (SQLite)</p>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-box pk"></div>
+                <span>Primary Key</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box fk"></div>
+                <span>Foreign Key</span>
+            </div>
+        </div>
+
+        <div style="background: #e8f4f8; border-left: 4px solid #3498db; padding: 16px; margin-bottom: 30px; border-radius: 4px;">
+            <strong>Hierarchy:</strong> Team → Projects → Tasks (with adhoc tasks at team level)<br>
+            <strong>Permission Model:</strong> Team members can view/edit all projects and tasks within their team
+        </div>
+
+        <div class="schema-grid">
+            <!-- Teams Table -->
+            <div class="table-card">
+                <div class="table-header">🏢 teams</div>
+                <div class="table-body">
+                    <div class="field pk">
+                        <div class="field-name">id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PRIMARY KEY</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">name</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">created_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">updated_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Users Table -->
+            <div class="table-card">
+                <div class="table-header">👤 users</div>
+                <div class="table-body">
+                    <div class="field pk">
+                        <div class="field-name">id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PRIMARY KEY</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">email</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">UNIQUE, NOT NULL</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">name</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">created_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Members Table -->
+            <div class="table-card">
+                <div class="table-header">👥 team_members</div>
+                <div class="table-body">
+                    <div class="field pk fk">
+                        <div class="field-name">team_id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PK, FK → teams(id)</div>
+                        </div>
+                    </div>
+                    <div class="field pk fk">
+                        <div class="field-name">user_id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PK, FK → users(id)</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">role</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">owner|admin|member</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">added_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Projects Table -->
+            <div class="table-card">
+                <div class="table-header">📁 projects</div>
+                <div class="table-body">
+                    <div class="field pk">
+                        <div class="field-name">id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PRIMARY KEY</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">team_id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL, FK → teams(id)</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">name</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">description</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">created_by</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">FK → users(id)</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">created_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">updated_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tasks Table -->
+            <div class="table-card">
+                <div class="table-header">✓ tasks</div>
+                <div class="table-body">
+                    <div class="field pk">
+                        <div class="field-name">id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">PRIMARY KEY</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">team_id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL, FK → teams(id)</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">title</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">NOT NULL</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">description</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">project_id</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">FK → projects(id) [NULL = adhoc]</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">assigned_to</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">FK → users(id)</div>
+                        </div>
+                    </div>
+                    <div class="field fk">
+                        <div class="field-name">created_by</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">FK → users(id)</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">priority</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">low|medium|high|urgent</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">status</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                            <div class="field-constraint">todo|in_progress|done</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">due_date</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">created_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-name">updated_at</div>
+                        <div class="field-info">
+                            <div class="field-type">TEXT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="relationships">
+            <h2>🔗 Relationships</h2>
+            <div class="rel-item">
+                <strong>team_members.team_id</strong> → <code>teams.id</code> - Team membership
+            </div>
+            <div class="rel-item">
+                <strong>team_members.user_id</strong> → <code>users.id</code> - User in team
+            </div>
+            <div class="rel-item">
+                <strong>projects.team_id</strong> → <code>teams.id</code> - Project belongs to team
+            </div>
+            <div class="rel-item">
+                <strong>projects.created_by</strong> → <code>users.id</code> - Project creator
+            </div>
+            <div class="rel-item">
+                <strong>tasks.team_id</strong> → <code>teams.id</code> - Task belongs to team (always)
+            </div>
+            <div class="rel-item">
+                <strong>tasks.project_id</strong> → <code>projects.id</code> - Task in project (NULL for adhoc tasks)
+            </div>
+            <div class="rel-item">
+                <strong>tasks.assigned_to</strong> → <code>users.id</code> - Task assignee
+            </div>
+            <div class="rel-item">
+                <strong>tasks.created_by</strong> → <code>users.id</code> - Task creator
+            </div>
+        </div>
+
+        <div class="indexes">
+            <h2>⚡ Performance Indexes</h2>
+            <div class="index-item">idx_team_members_user ON team_members(user_id)</div>
+            <div class="index-item">idx_projects_team ON projects(team_id)</div>
+            <div class="index-item">idx_tasks_team ON tasks(team_id)</div>
+            <div class="index-item">idx_tasks_project ON tasks(project_id)</div>
+            <div class="index-item">idx_tasks_assigned ON tasks(assigned_to)</div>
+            <div class="index-item">idx_tasks_status ON tasks(status)</div>
+            <div class="index-item">idx_tasks_due_date ON tasks(due_date)</div>
+        </div>
+    </div>
+</body>
+</html>
