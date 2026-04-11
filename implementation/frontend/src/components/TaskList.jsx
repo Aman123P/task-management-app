@@ -1,5 +1,65 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { taskService } from '../services/task';
+
+function ActivityLog({ taskId, taskTitle }) {
+  const [logs, setLogs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const openModal = async () => {
+    setOpen(true);
+    setLoading(true);
+    const data = await taskService.getActivityLog(taskId);
+    setLogs(data.logs);
+    setLoading(false);
+  };
+
+  return (
+    <>
+      <button onClick={openModal} style={actStyles.toggleBtn}>▼ Activity Log</button>
+
+      {open && (
+        <div style={actStyles.overlay} onClick={() => setOpen(false)}>
+          <div style={actStyles.modal} onClick={e => e.stopPropagation()}>
+            <div style={actStyles.modalHeader}>
+              <span style={actStyles.modalTitle}>Activity Log — {taskTitle}</span>
+              <button onClick={() => setOpen(false)} style={actStyles.closeBtn}>✕</button>
+            </div>
+            <div style={actStyles.modalBody}>
+              {loading ? (
+                <p style={actStyles.empty}>Loading...</p>
+              ) : logs.length === 0 ? (
+                <p style={actStyles.empty}>No activity yet</p>
+              ) : logs.map(l => (
+                <div key={l.id} style={actStyles.entry}>
+                  <span style={actStyles.user}>{l.user_name || 'Unknown'}</span>
+                  <span style={actStyles.action}> {l.action}</span>
+                  <span style={actStyles.time}>{new Date(l.created_at).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const actStyles = {
+  toggleBtn: { fontSize: '12px', background: 'none', border: 'none', color: '#3498db', cursor: 'pointer', padding: '4px 0', marginTop: '6px' },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  modal: { background: '#fff', borderRadius: '8px', width: '480px', maxWidth: '90vw', maxHeight: '70vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #eee' },
+  modalTitle: { fontWeight: '600', fontSize: '15px' },
+  closeBtn: { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#999', lineHeight: 1 },
+  modalBody: { overflowY: 'auto', padding: '16px 20px', flex: 1 },
+  entry: { display: 'flex', flexDirection: 'column', gap: '2px', padding: '10px 0', borderBottom: '1px solid #f0f0f0' },
+  user: { fontWeight: '600', fontSize: '13px', color: '#333' },
+  action: { fontSize: '13px', color: '#555' },
+  time: { fontSize: '11px', color: '#999', marginTop: '2px' },
+  empty: { fontSize: '13px', color: '#999', textAlign: 'center', padding: '20px 0' }
+};
 
 export default function TaskList({ teamId, projects, teamMembers }) {
   const [tasks, setTasks] = useState([]);
@@ -7,37 +67,49 @@ export default function TaskList({ teamId, projects, teamMembers }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    project_id: '',
-    assigned_to: '',
-    priority: 'medium',
-    status: 'todo',
-    due_date: ''
+    title: '', description: '', project_id: '', assigned_to: '',
+    priority: 'medium', status: 'todo', due_date: ''
   });
-  const [filters, setFilters] = useState({
-    project_id: '',
-    assigned_to: '',
-    priority: '',
-    status: ''
-  });
-  const [sortBy, setSortBy] = useState('created_at'); // created_at, due_date, priority
+  const [filters, setFilters] = useState({ project_id: '', assigned_to: '', priority: '', status: '' });
+  const [sortBy, setSortBy] = useState('created_at');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const LIMIT = 2;
 
+  const loadTasksRef = useRef(null);
+
+  useEffect(() => { if (teamId) loadTasks(); }, [teamId, page, filters]);
+  useEffect(() => { applySort(); }, [tasks, sortBy]);
+
+  // Keep ref updated so socket always calls latest loadTasks
+  useEffect(() => { loadTasksRef.current = loadTasks; });
+
+  // Socket.io — join team room and listen for task changes
   useEffect(() => {
-    if (teamId) {
-      loadTasks();
-    }
+    if (!teamId) return;
+    const socket = io(import.meta.env.VITE_API_URL);
+    socket.on('connect', () => console.log('Socket connected:', socket.id));
+    socket.on('connect_error', (err) => console.error('Socket error:', err.message));
+    socket.emit('join_team', teamId);
+    socket.on('task_changed', (data) => {
+      console.log('task_changed received:', data);
+      loadTasksRef.current?.();
+    });
+    return () => {
+      socket.emit('leave_team', teamId);
+      socket.disconnect();
+    };
   }, [teamId]);
 
-  useEffect(() => {
-    applyFiltersAndSort();
-  }, [tasks, filters, sortBy]);
-
   const loadTasks = async () => {
+    setLoading(true);
     try {
-      const data = await taskService.getTasks(teamId);
+      const data = await taskService.getTasks(teamId, filters, page, LIMIT);
       setTasks(data.tasks);
+      setTotalPages(data.totalPages);
+      setTotal(data.total);
     } catch (err) {
       console.error('Failed to load tasks:', err);
     } finally {
@@ -45,100 +117,56 @@ export default function TaskList({ teamId, projects, teamMembers }) {
     }
   };
 
-  const applyFiltersAndSort = () => {
-    let filtered = [...tasks];
-
-    // Apply filters
-    if (filters.project_id) {
-      if (filters.project_id === 'adhoc') {
-        filtered = filtered.filter(t => !t.project_id);
-      } else {
-        filtered = filtered.filter(t => t.project_id === filters.project_id);
-      }
-    }
-
-    if (filters.assigned_to) {
-      if (filters.assigned_to === 'unassigned') {
-        filtered = filtered.filter(t => !t.assigned_to);
-      } else {
-        filtered = filtered.filter(t => t.assigned_to === filters.assigned_to);
-      }
-    }
-
-    if (filters.priority) {
-      filtered = filtered.filter(t => t.priority === filters.priority);
-    }
-
-    if (filters.status) {
-      filtered = filtered.filter(t => t.status === filters.status);
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
+  const applySort = () => {
+    const sorted = [...tasks].sort((a, b) => {
       if (sortBy === 'due_date') {
         if (!a.due_date) return 1;
         if (!b.due_date) return -1;
         return new Date(a.due_date) - new Date(b.due_date);
       } else if (sortBy === 'priority') {
-        const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      } else {
-        // created_at (newest first)
-        return new Date(b.created_at) - new Date(a.created_at);
+        const order = { urgent: 0, high: 1, medium: 2, low: 3 };
+        return order[a.priority] - order[b.priority];
       }
+      return new Date(b.created_at) - new Date(a.created_at);
     });
+    setFilteredTasks(sorted);
+  };
 
-    setFilteredTasks(filtered);
+  const handleFilterChange = (newFilters) => {
+    setFilters(newFilters);
+    setPage(1); // reset to page 1 on filter change
   };
 
   const clearFilters = () => {
-    setFilters({
-      project_id: '',
-      assigned_to: '',
-      priority: '',
-      status: ''
-    });
+    handleFilterChange({ project_id: '', assigned_to: '', priority: '', status: '' });
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) return;
-
     try {
-      const data = await taskService.createTask(teamId, formData);
-      setTasks([data.task, ...tasks]);
+      await taskService.createTask(teamId, formData);
       resetForm();
-    } catch (err) {
-      alert('Failed to create task');
-    }
+      loadTasks();
+    } catch (err) { alert('Failed to create task'); }
   };
 
   const handleUpdate = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) return;
-
     try {
       await taskService.updateTask(editingTask.id, formData);
-      setTasks(tasks.map(t => 
-        t.id === editingTask.id 
-          ? { ...t, ...formData }
-          : t
-      ));
       resetForm();
-    } catch (err) {
-      alert('Failed to update task');
-    }
+      loadTasks();
+    } catch (err) { alert('Failed to update task'); }
   };
 
   const handleDelete = async (taskId) => {
     if (!confirm('Are you sure you want to delete this task?')) return;
-
     try {
       await taskService.deleteTask(taskId);
-      setTasks(tasks.filter(t => t.id !== taskId));
-    } catch (err) {
-      alert('Failed to delete task');
-    }
+      loadTasks();
+    } catch (err) { alert('Failed to delete task'); }
   };
 
   const startEdit = (task) => {
@@ -206,7 +234,7 @@ export default function TaskList({ teamId, projects, teamMembers }) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h3>Tasks ({filteredTasks.length}{tasks.length !== filteredTasks.length ? ` of ${tasks.length}` : ''})</h3>
+        <h3>Tasks ({total})</h3>
         <button onClick={() => setShowCreate(true)} style={styles.addBtn}>
           + New Task
         </button>
@@ -215,35 +243,25 @@ export default function TaskList({ teamId, projects, teamMembers }) {
       {/* Filters and Sort */}
       <div style={styles.filterBar}>
         <div style={styles.filters}>
-          <select
-            value={filters.project_id}
-            onChange={(e) => setFilters({ ...filters, project_id: e.target.value })}
-            style={styles.filterSelect}
-          >
+          <select value={filters.project_id}
+            onChange={(e) => handleFilterChange({ ...filters, project_id: e.target.value })}
+            style={styles.filterSelect}>
             <option value="">All Projects</option>
             <option value="adhoc">Adhoc Tasks</option>
-            {projects.map(project => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
+            {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
 
-          <select
-            value={filters.assigned_to}
-            onChange={(e) => setFilters({ ...filters, assigned_to: e.target.value })}
-            style={styles.filterSelect}
-          >
+          <select value={filters.assigned_to}
+            onChange={(e) => handleFilterChange({ ...filters, assigned_to: e.target.value })}
+            style={styles.filterSelect}>
             <option value="">All Assignees</option>
             <option value="unassigned">Unassigned</option>
-            {teamMembers.map(member => (
-              <option key={member.id} value={member.id}>{member.name}</option>
-            ))}
+            {teamMembers.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
           </select>
 
-          <select
-            value={filters.priority}
-            onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-            style={styles.filterSelect}
-          >
+          <select value={filters.priority}
+            onChange={(e) => handleFilterChange({ ...filters, priority: e.target.value })}
+            style={styles.filterSelect}>
             <option value="">All Priorities</option>
             <option value="urgent">Urgent</option>
             <option value="high">High</option>
@@ -251,21 +269,17 @@ export default function TaskList({ teamId, projects, teamMembers }) {
             <option value="low">Low</option>
           </select>
 
-          <select
-            value={filters.status}
-            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-            style={styles.filterSelect}
-          >
+          <select value={filters.status}
+            onChange={(e) => handleFilterChange({ ...filters, status: e.target.value })}
+            style={styles.filterSelect}>
             <option value="">All Statuses</option>
             <option value="todo">To Do</option>
             <option value="in_progress">In Progress</option>
             <option value="done">Done</option>
           </select>
 
-          {hasActiveFilters && (
-            <button onClick={clearFilters} style={styles.clearBtn}>
-              Clear Filters
-            </button>
+          {Object.values(filters).some(v => v !== '') && (
+            <button onClick={clearFilters} style={styles.clearBtn}>Clear Filters</button>
           )}
         </div>
 
@@ -396,6 +410,7 @@ export default function TaskList({ teamId, projects, teamMembers }) {
                     {task.status.replace('_', ' ')}
                   </span>
                 </div>
+                <ActivityLog taskId={task.id} taskTitle={task.title} />
               </div>
               <div style={styles.taskActions}>
                 <button onClick={() => startEdit(task)} style={styles.editBtn}>
@@ -409,6 +424,14 @@ export default function TaskList({ teamId, projects, teamMembers }) {
           ))
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div style={styles.pagination}>
+          <button onClick={() => setPage(p => p - 1)} disabled={page === 1} style={styles.pageBtn}>← Prev</button>
+          <span style={styles.pageInfo}>Page {page} of {totalPages}</span>
+          <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages} style={styles.pageBtn}>Next →</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -618,5 +641,14 @@ const styles = {
     textAlign: 'center',
     color: '#999',
     fontStyle: 'italic'
-  }
+  },
+  pagination: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    gap: '16px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #eee'
+  },
+  pageBtn: {
+    padding: '8px 16px', border: '1px solid #ddd', borderRadius: '4px',
+    background: 'white', cursor: 'pointer', fontSize: '13px'
+  },
+  pageInfo: { fontSize: '13px', color: '#666' }
 };

@@ -3,7 +3,7 @@ import { authService } from './auth';
 const API_URL = import.meta.env.VITE_API_URL;
 
 export const taskService = {
-  async getTasks(teamId, filters = {}) {
+  async getTasks(teamId, filters = {}, page = 1, limit = 10) {
     const token = authService.getToken();
     const params = new URLSearchParams();
     
@@ -11,11 +11,10 @@ export const taskService = {
     if (filters.status) params.append('status', filters.status);
     if (filters.priority) params.append('priority', filters.priority);
     if (filters.assigned_to) params.append('assigned_to', filters.assigned_to);
+    params.append('page', page);
+    params.append('limit', limit);
 
-    const queryString = params.toString();
-    const url = `${API_URL}/api/tasks/team/${teamId}${queryString ? '?' + queryString : ''}`;
-
-    const res = await fetch(url, {
+    const res = await fetch(`${API_URL}/api/tasks/team/${teamId}?${params.toString()}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) throw new Error('Failed to fetch tasks');
@@ -57,6 +56,15 @@ export const taskService = {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) throw new Error('Failed to delete task');
+    return res.json();
+  },
+
+  async getActivityLog(taskId) {
+    const token = authService.getToken();
+    const res = await fetch(`${API_URL}/api/tasks/${taskId}/activity`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Failed to fetch activity log');
     return res.json();
   }
 };

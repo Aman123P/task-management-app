@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS team_members (
   team_id TEXT REFERENCES teams(id) ON DELETE CASCADE,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+  team_role TEXT DEFAULT 'engineer' CHECK (team_role IN ('manager', 'engineer', 'designer', 'qa')),
   added_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (team_id, user_id)
 );
@@ -78,7 +79,27 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_organizations_name ON organizations(name);
+CREATE TABLE IF NOT EXISTS task_activity_logs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_task ON task_activity_logs(task_id);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT UNIQUE NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+
 CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_teams_org ON teams(organization_id);

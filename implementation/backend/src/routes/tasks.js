@@ -4,45 +4,49 @@ import { authenticate, requireTeamMember } from '../middleware/auth.js';
 
 const router = express.Router();
 
+function logActivity(db, taskId, userId, action) {
+  const id = randomBytes(16).toString('hex');
+  db.run('INSERT INTO task_activity_logs (id, task_id, user_id, action) VALUES (?, ?, ?, ?)',
+    [id, taskId, userId, action]);
+}
+
 // Get all tasks in a team
 router.get('/team/:teamId', authenticate, requireTeamMember, (req, res) => {
   const { teamId } = req.params;
-  const { project_id, status, priority, assigned_to } = req.query;
+  const { project_id, status, priority, assigned_to, page = 1, limit = 10 } = req.query;
 
-  let query = 'SELECT * FROM tasks WHERE team_id = ?';
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  let baseQuery = 'FROM tasks WHERE team_id = ?';
   const params = [teamId];
 
   if (project_id) {
     if (project_id === 'adhoc') {
-      query += ' AND project_id IS NULL';
+      baseQuery += ' AND project_id IS NULL';
     } else {
-      query += ' AND project_id = ?';
+      baseQuery += ' AND project_id = ?';
       params.push(project_id);
     }
   }
+  if (status) { baseQuery += ' AND status = ?'; params.push(status); }
+  if (priority) { baseQuery += ' AND priority = ?'; params.push(priority); }
+  if (assigned_to) { baseQuery += ' AND assigned_to = ?'; params.push(assigned_to); }
 
-  if (status) {
-    query += ' AND status = ?';
-    params.push(status);
-  }
+  // Get total count first
+  req.db.get(`SELECT COUNT(*) as total ${baseQuery}`, params, (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
 
-  if (priority) {
-    query += ' AND priority = ?';
-    params.push(priority);
-  }
+    const total = row.total;
+    const totalPages = Math.ceil(total / parseInt(limit));
 
-  if (assigned_to) {
-    query += ' AND assigned_to = ?';
-    params.push(assigned_to);
-  }
-
-  query += ' ORDER BY created_at DESC';
-
-  req.db.all(query, params, (err, tasks) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    res.json({ tasks });
+    req.db.all(
+      `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), offset],
+      (err, tasks) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ tasks, total, page: parseInt(page), totalPages, limit: parseInt(limit) });
+      }
+    );
   });
 });
 
@@ -66,6 +70,9 @@ router.post('/team/:teamId', authenticate, requireTeamMember, (req, res) => {
       if (err) {
         return res.status(500).json({ error: 'Failed to create task' });
       }
+
+      logActivity(req.db, taskId, userId, `created task "${title}"`);
+      req.io.to(`team_${teamId}`).emit('task_changed', { action: 'created', teamId });
 
       res.status(201).json({
         task: {
@@ -157,7 +164,14 @@ router.put('/:taskId', authenticate, (req, res) => {
     }
 
     function performUpdate() {
-      // Update task
+      // Build activity message from changes
+      const changes = [];
+      if (title !== task.title) changes.push(`title to "${title}"`);
+      if (status !== task.status) changes.push(`status to "${status}"`);
+      if (priority !== task.priority) changes.push(`priority to "${priority}"`);
+      if (assigned_to !== task.assigned_to) changes.push(`assignee`);
+      const action = changes.length ? `updated ${changes.join(', ')}` : 'updated task';
+
       req.db.run(
           `UPDATE tasks SET title = ?, description = ?, project_id = ?, assigned_to = ?, priority = ?, status = ?, due_date = ?, updated_at = datetime("now") 
            WHERE id = ?`,
@@ -166,6 +180,9 @@ router.put('/:taskId', authenticate, (req, res) => {
             if (err) {
               return res.status(500).json({ error: 'Failed to update task' });
             }
+
+            logActivity(req.db, taskId, userId, action);
+            req.io.to(`team_${task.team_id}`).emit('task_changed', { action: 'updated', teamId: task.team_id });
 
             res.json({ 
               task: { 
@@ -199,29 +216,51 @@ router.delete('/:taskId', authenticate, (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Check team membership
-    req.db.get(
-      'SELECT role FROM team_members WHERE team_id = ? AND user_id = ?',
-      [task.team_id, userId],
-      (err, membership) => {
-        if (err) {
-          return res.status(500).json({ error: 'Database error' });
-        }
-        if (!membership) {
+    // Check team membership or admin
+    const { role, organizationId } = req.user;
+    if (role === 'super_admin' || role === 'admin') {
+      req.db.get('SELECT organization_id FROM teams WHERE id = ?', [task.team_id], (err, team) => {
+        if (err || !team || team.organization_id !== organizationId)
           return res.status(403).json({ error: 'Access denied' });
+        performDelete();
+      });
+    } else {
+      req.db.get('SELECT role FROM team_members WHERE team_id = ? AND user_id = ?',
+        [task.team_id, userId],
+        (err, membership) => {
+          if (err) return res.status(500).json({ error: 'Database error' });
+          if (!membership) return res.status(403).json({ error: 'Access denied' });
+          performDelete();
         }
+      );
+    }
 
-        // Delete task
-        req.db.run('DELETE FROM tasks WHERE id = ?', [taskId], (err) => {
-          if (err) {
-            return res.status(500).json({ error: 'Failed to delete task' });
-          }
-
-          res.json({ message: 'Task deleted successfully' });
-        });
-      }
-    );
+    function performDelete() {
+      req.db.run('DELETE FROM tasks WHERE id = ?', [taskId], (err) => {
+        if (err) return res.status(500).json({ error: 'Failed to delete task' });
+        logActivity(req.db, taskId, userId, `deleted task "${task.title}"`);
+        req.io.to(`team_${task.team_id}`).emit('task_changed', { action: 'deleted', teamId: task.team_id });
+        res.json({ message: 'Task deleted successfully' });
+      });
+    }
   });
+});
+
+// Get activity log for a task
+router.get('/:taskId/activity', authenticate, (req, res) => {
+  const { taskId } = req.params;
+  req.db.all(
+    `SELECT tal.id, tal.action, tal.created_at, u.name as user_name
+     FROM task_activity_logs tal
+     LEFT JOIN users u ON tal.user_id = u.id
+     WHERE tal.task_id = ?
+     ORDER BY tal.created_at DESC`,
+    [taskId],
+    (err, logs) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json({ logs });
+    }
+  );
 });
 
 export default router;

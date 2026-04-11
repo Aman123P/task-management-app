@@ -6,6 +6,16 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
+function generateTokens(db, userId, payload) {
+  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const refreshToken = randomBytes(40).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const id = randomBytes(16).toString('hex');
+  db.run('INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)',
+    [id, userId, refreshToken, expiresAt]);
+  return { accessToken, refreshToken };
+}
+
 // Get all users in organization (admin only)
 router.get('/users', authenticate, (req, res) => {
   const organizationId = req.user.organizationId;
@@ -86,14 +96,12 @@ router.post('/register-organization', async (req, res) => {
                 return res.status(500).json({ error: 'Failed to create user' });
               }
 
-              const token = jwt.sign(
-                { id: userId, email, organizationId: orgId, role: 'super_admin' },
-                process.env.JWT_SECRET,
-                { expiresIn: '7d' }
-              );
+              const { accessToken, refreshToken } = generateTokens(req.db, userId,
+                { id: userId, email, organizationId: orgId, role: 'super_admin' });
 
               res.status(201).json({
-                token,
+                token: accessToken,
+                refreshToken,
                 user: { id: userId, email, name, organizationId: orgId, role: 'super_admin' }
               });
             }
@@ -228,20 +236,15 @@ router.post('/login', async (req, res) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      const token = jwt.sign(
-        { id: user.id, email: user.email, organizationId: user.organization_id, role: user.role }, 
-        process.env.JWT_SECRET, 
-        { expiresIn: process.env.JWT_EXPIRES_IN }
-      );
+      const { accessToken, refreshToken } = generateTokens(req.db, user.id,
+        { id: user.id, email: user.email, organizationId: user.organization_id, role: user.role });
 
       res.json({ 
-        token, 
+        token: accessToken,
+        refreshToken,
         user: { 
-          id: user.id, 
-          email: user.email, 
-          name: user.name, 
-          organizationId: user.organization_id, 
-          role: user.role,
+          id: user.id, email: user.email, name: user.name,
+          organizationId: user.organization_id, role: user.role,
           mustChangePassword: user.must_change_password === 1
         } 
       });
@@ -249,6 +252,41 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Login failed' });
   }
+});
+
+// Refresh access token
+router.post('/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'Refresh token required' });
+
+  req.db.get(
+    'SELECT rt.*, u.email, u.organization_id, u.role FROM refresh_tokens rt JOIN users u ON rt.user_id = u.id WHERE rt.token = ?',
+    [refreshToken],
+    (err, row) => {
+      if (err || !row) return res.status(401).json({ error: 'Invalid refresh token' });
+      if (new Date(row.expires_at) < new Date()) {
+        req.db.run('DELETE FROM refresh_tokens WHERE token = ?', [refreshToken]);
+        return res.status(401).json({ error: 'Refresh token expired' });
+      }
+
+      const { accessToken, refreshToken: newRefreshToken } = generateTokens(req.db, row.user_id,
+        { id: row.user_id, email: row.email, organizationId: row.organization_id, role: row.role });
+
+      // Rotate: delete old refresh token
+      req.db.run('DELETE FROM refresh_tokens WHERE token = ?', [refreshToken]);
+
+      res.json({ token: accessToken, refreshToken: newRefreshToken });
+    }
+  );
+});
+
+// Logout — invalidate refresh token
+router.post('/logout', authenticate, (req, res) => {
+  const { refreshToken } = req.body;
+  if (refreshToken) {
+    req.db.run('DELETE FROM refresh_tokens WHERE token = ?', [refreshToken]);
+  }
+  res.json({ message: 'Logged out' });
 });
 
 export default router;

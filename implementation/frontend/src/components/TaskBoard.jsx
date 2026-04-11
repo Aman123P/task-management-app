@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { taskService } from '../services/task';
 
 export default function TaskBoard({ teamId, projects, teamMembers }) {
@@ -6,11 +7,23 @@ export default function TaskBoard({ teamId, projects, teamMembers }) {
   const [loading, setLoading] = useState(true);
   const [draggedTask, setDraggedTask] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const loadTasksRef = useRef(null);
 
   useEffect(() => {
-    if (teamId) {
-      loadTasks();
-    }
+    if (teamId) loadTasks();
+  }, [teamId]);
+
+  useEffect(() => { loadTasksRef.current = loadTasks; });
+
+  useEffect(() => {
+    if (!teamId) return;
+    const socket = io(import.meta.env.VITE_API_URL);
+    socket.emit('join_team', teamId);
+    socket.on('task_changed', () => loadTasksRef.current?.());
+    return () => {
+      socket.emit('leave_team', teamId);
+      socket.disconnect();
+    };
   }, [teamId]);
 
   const loadTasks = async () => {
